@@ -1,0 +1,13 @@
+{
+  "name": "cargo-express",
+  "version": "1.0.0",
+  "description": "CargoExpress Bot",
+  "private": true,
+  "scripts": {
+    "dev": "cd packages/bot && npm run dev",
+    "install:all": "cd packages/bot && npm install && cd ../shared && npm install"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}
