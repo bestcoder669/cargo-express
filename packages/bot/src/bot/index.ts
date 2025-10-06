@@ -1,7 +1,7 @@
 // packages/bot/src/bot/index.ts - Инициализация бота
 import { Bot, session, webhookCallback } from 'grammy'
 import { hydrate } from '@grammyjs/hydrate'
-import { conversations, createConversation } from '@grammyjs/conversations'
+import { conversations } from '@grammyjs/conversations'
 import { autoRetry } from '@grammyjs/auto-retry'
 import { limit } from '@grammyjs/ratelimiter'
 import { parseMode } from '@grammyjs/parse-mode'
@@ -25,7 +25,13 @@ interface SessionData {
   scene?: string
   sceneData?: Record<string, any>
   language?: string
-  // Добавьте другие необходимые поля сессии
+  referrerId?: string
+  userId?: string
+  user?: any
+  isAdmin?: boolean
+  admin?: any
+  orderCreation?: any
+  messageToDelete?: number[]
 }
 
 // Инициализация i18n
@@ -62,7 +68,7 @@ export async function createBot(): Promise<Bot<BotContext>> {
     })
   )
   
-  // Conversations
+  // Conversations ДОЛЖНЫ быть ПОСЛЕ session
   bot.use(conversations())
   
   // Rate limiting
@@ -85,7 +91,7 @@ export async function createBot(): Promise<Bot<BotContext>> {
   // Setup commands
   setupCommands(bot)
   
-  // Setup scenes
+  // Setup scenes (включая conversations)
   await setupScenes(bot)
   
   // Error handler

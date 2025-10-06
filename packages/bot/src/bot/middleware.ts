@@ -2,7 +2,7 @@
 import type { Bot } from 'grammy'
 import type { BotContext } from '../types/context'
 import { logger } from '../utils/logger'
-import { getUserByTelegramId, getAdminByTelegramId } from '../services/user'
+import { getUserByTelegramId, getAdminByTelegramId, updateLastActivity } from '../services/user'
 
 export async function setupMiddlewares(bot: Bot<BotContext>): Promise<void> {
   // Logging middleware
@@ -37,6 +37,9 @@ export async function setupMiddlewares(bot: Bot<BotContext>): Promise<void> {
     if (user) {
       ctx.session.userId = user.id
       ctx.session.user = user
+      
+      // Update last activity
+      await updateLastActivity(user.id).catch(() => {})
     }
     
     // Check if admin
@@ -54,22 +57,6 @@ export async function setupMiddlewares(bot: Bot<BotContext>): Promise<void> {
   
   // Helper methods middleware
   bot.use(async (ctx, next) => {
-    // Safe markdown reply
-    ctx.replyWithMarkdown = async (text: string, other?: Record<string, unknown>) => {
-      return ctx.reply(text, {
-        parse_mode: 'MarkdownV2',
-        ...other,
-      })
-    }
-    
-    // Safe HTML reply
-    ctx.replyWithHTML = async (text: string, other?: Record<string, unknown>) => {
-      return ctx.reply(text, {
-        parse_mode: 'HTML',
-        ...other,
-      })
-    }
-    
     // Safe message deletion
     ctx.deleteMessageSafe = async (messageId: number): Promise<boolean> => {
       try {

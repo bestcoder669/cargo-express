@@ -1,14 +1,14 @@
 // packages/bot/src/bot/commands.ts - Обработчики команд
-import type { Bot } from 'grammy'
+import { Bot, InlineKeyboard } from 'grammy'
 import type { BotContext } from '../types/context'
 import { mainMenuKeyboard, quickActionsKeyboard, profileKeyboard } from '../keyboards/main'
 import { getWarehousesKeyboard, getCountriesKeyboard } from '../keyboards/dynamic'
 import { getAdminDashboardKeyboard } from '../keyboards/admin'
-import { getUserStats } from '../services/stats'
+import { getUserStats, getDashboardStats, getQuickStats } from '../services/stats'
 import { formatCurrency, formatDate } from '../utils/formatter'
 import { trackOrder } from '../services/tracking'
 import { logger } from '../utils/logger'
-import { getDashboardStats, getQuickStats } from '../services/stats'
+import Decimal from 'decimal.js'
 
 export function setupCommands(bot: Bot<BotContext>): void {
   // Команда /start
@@ -26,7 +26,7 @@ export function setupCommands(bot: Bot<BotContext>): void {
       
       if (!ctx.user) {
         // Новый пользователь - начинаем регистрацию
-        await ctx.replyWithHTML(
+        await ctx.reply(
           '🚀 <b>Добро пожаловать в CargoExpress!</b>\n\n' +
           'Доставка товаров из-за рубежа в Россию 🇷🇺\n\n' +
           '🌍 Работаем со складами по всему миру\n' +
@@ -34,6 +34,7 @@ export function setupCommands(bot: Bot<BotContext>): void {
           '⚡ Быстро, надежно, выгодно\n\n' +
           'Изучите наши возможности:',
           {
+            parse_mode: 'HTML',
             reply_markup: new InlineKeyboard()
               .text('🏢 Адреса складов', 'info:warehouses')
               .text('📋 Как это работает', 'info:how')
@@ -48,21 +49,47 @@ export function setupCommands(bot: Bot<BotContext>): void {
       }
       
       // Зарегистрированный пользователь
-      const stats = await getUserStats(ctx.user.id)
+      let stats
+      try {
+        stats = await getUserStats(ctx.user.id)
+      } catch (statsError) {
+        logger.error('Failed to get user stats in /start:', statsError)
+        // Используем дефолтные значения если не удалось получить статистику
+        stats = {
+          balance: new Decimal(0),
+          totalOrders: 0,
+          activeOrders: 0,
+          totalSpent: new Decimal(0),
+          totalSaved: new Decimal(0),
+          vipTier: 'REGULAR' as const,
+          vipExpiresAt: undefined
+        }
+      }
+      
       const mainKeyboard = await mainMenuKeyboard(ctx)
       
-      await ctx.replyWithHTML(
+      await ctx.reply(
         `👋 <b>Добро пожаловать, ${ctx.user.firstName}!</b>\n\n` +
         `🆔 ID: <code>#${ctx.user.customId}</code>\n` +
         `💰 Баланс: <b>${formatCurrency(stats.balance)}</b>\n` +
         `📦 Активных заказов: <b>${stats.activeOrders}</b>\n` +
         (stats.vipTier !== 'REGULAR' ? `🎁 VIP статус: <b>${stats.vipTier}</b>\n` : ''),
         {
+          parse_mode: 'HTML',
           reply_markup: mainKeyboard
         }
       )
     } catch (error) {
-      logger.error('Error in /start command:', error)
+      logger.error('Error in /start command:', {
+        error: error instanceof Error ? {
+          message: error.message,
+          stack: error.stack,
+          name: error.name
+        } : error,
+        userId: ctx.user?.id,
+        telegramId: ctx.from?.id
+      })
+      console.error('Full error in /start:', error)
       await ctx.reply('❌ Произошла ошибка. Попробуйте позже или обратитесь в поддержку.')
     }
   })
@@ -72,13 +99,14 @@ export function setupCommands(bot: Bot<BotContext>): void {
     const trackingNumber = ctx.match?.trim()
     
     if (!trackingNumber) {
-      await ctx.replyWithHTML(
+      await ctx.reply(
         '📍 <b>Отслеживание посылки</b>\n\n' +
         'Введите номер заказа или трек-номер:\n\n' +
         '<i>Примеры:</i>\n' +
         '• <code>#SP12345</code> (номер заказа)\n' +
         '• <code>CP123456789US</code> (трек-номер)',
         {
+          parse_mode: 'HTML',
           reply_markup: new InlineKeyboard()
             .text('📦 Мои активные заказы', 'orders:active')
             .row()
@@ -95,7 +123,7 @@ export function setupCommands(bot: Bot<BotContext>): void {
       return
     }
     
-    const statusEmoji = {
+    const statusEmoji: Record<string, string> = {
       CREATED: '🆕',
       PAID: '💳',
       WAREHOUSE_RECEIVED: '📦',
@@ -107,7 +135,7 @@ export function setupCommands(bot: Bot<BotContext>): void {
       DELIVERED: '✅',
     }
     
-    await ctx.replyWithHTML(
+    await ctx.reply(
       `📍 <b>Отслеживание ${tracking.orderNumber}</b>\n\n` +
       `📦 ${tracking.description}\n` +
       `👤 Получатель: ${tracking.recipient}\n` +
@@ -120,6 +148,7 @@ export function setupCommands(bot: Bot<BotContext>): void {
         `${h.date} - ${h.status}${h.location ? ` (${h.location})` : ''}`
       ).join('\n'),
       {
+        parse_mode: 'HTML',
         reply_markup: new InlineKeyboard()
           .text('🔄 Обновить статус', `track:refresh:${trackingNumber}`)
           .text('📞 Поддержка', 'support:order')
@@ -135,11 +164,12 @@ export function setupCommands(bot: Bot<BotContext>): void {
   bot.command('warehouses', async (ctx) => {
     const keyboard = await getWarehousesKeyboard()
     
-    await ctx.replyWithHTML(
+    await ctx.reply(
       '🏢 <b>Наши склады по миру</b>\n\n' +
       `Отправляйте посылки с указанием ID: <code>#${ctx.user?.customId || 'XXXXX'}</code>\n` +
       'Выберите склад для просмотра адреса:',
       {
+        parse_mode: 'HTML',
         reply_markup: keyboard
       }
     )
@@ -147,11 +177,12 @@ export function setupCommands(bot: Bot<BotContext>): void {
   
   // Команда /calculator - калькулятор стоимости
   bot.command('calculator', async (ctx) => {
-    await ctx.replyWithHTML(
+    await ctx.reply(
       '📊 <b>Калькулятор стоимости доставки</b>\n\n' +
       'Рассчитайте стоимость доставки заранее.\n' +
       'Выберите страну отправления:',
       {
+        parse_mode: 'HTML',
         reply_markup: await getCountriesKeyboard('shipping')
       }
     )
@@ -159,11 +190,12 @@ export function setupCommands(bot: Bot<BotContext>): void {
   
   // Команда /support - поддержка
   bot.command('support', async (ctx) => {
-    await ctx.replyWithHTML(
+    await ctx.reply(
       '💬 <b>Поддержка CargoExpress</b>\n' +
       '🟢 Онлайн 24/7 | Средний ответ: 3 минуты\n\n' +
       'Как можем помочь?',
       {
+        parse_mode: 'HTML',
         reply_markup: new InlineKeyboard()
           .text('❓ Частые вопросы', 'support:faq')
           .text('📍 Где моя посылка?', 'support:tracking')
@@ -191,7 +223,7 @@ export function setupCommands(bot: Bot<BotContext>): void {
     const stats = await getUserStats(ctx.user.id)
     const keyboard = await profileKeyboard(ctx.user.id)
     
-    await ctx.replyWithHTML(
+    await ctx.reply(
       `👤 <b>${ctx.user.firstName} ${ctx.user.lastName || ''}</b>\n` +
       `🆔 ID: <code>#${ctx.user.customId}</code> | 💰 Баланс: <b>${formatCurrency(stats.balance)}</b>\n\n` +
       '📊 <b>Ваша статистика:</b>\n' +
@@ -202,6 +234,7 @@ export function setupCommands(bot: Bot<BotContext>): void {
       `└ Статус: ${stats.vipTier === 'REGULAR' ? 'Обычный' : `VIP ${stats.vipTier} ⭐`}\n\n` +
       'Управление профилем:',
       {
+        parse_mode: 'HTML',
         reply_markup: keyboard
       }
     )
@@ -209,7 +242,7 @@ export function setupCommands(bot: Bot<BotContext>): void {
   
   // Команда /help - помощь
   bot.command('help', async (ctx) => {
-    await ctx.replyWithHTML(
+    await ctx.reply(
       '❓ <b>Помощь по использованию бота</b>\n\n' +
       '<b>Основные команды:</b>\n' +
       '/start - Главное меню\n' +
@@ -230,6 +263,7 @@ export function setupCommands(bot: Bot<BotContext>): void {
       '4. Оплатите предоплату\n\n' +
       'По всем вопросам: /support',
       {
+        parse_mode: 'HTML',
         reply_markup: quickActionsKeyboard
       }
     )
@@ -244,9 +278,9 @@ export function setupCommands(bot: Bot<BotContext>): void {
     
     const stats = await getDashboardStats()
     
-    await ctx.replyWithHTML(
+    await ctx.reply(
       '🔧 <b>AdminPanel CargoExpress</b>\n' +
-      `👨‍💼 ${ctx.admin!.firstName} ${ctx.admin!.lastName} | ${ctx.admin!.role}\n\n` +
+      `👨‍💼 ${ctx.admin!.firstName} ${ctx.admin!.lastName || ''} | ${ctx.admin!.role}\n\n` +
       `📊 <b>DASHBOARD (${formatDate(new Date())})</b>\n\n` +
       '💰 <b>ФИНАНСЫ ЗА СЕГОДНЯ:</b>\n' +
       `├ Выручка: ${formatCurrency(stats.todayRevenue)} (${stats.revenueChange > 0 ? '+' : ''}${stats.revenueChange}%)\n` +
@@ -263,6 +297,7 @@ export function setupCommands(bot: Bot<BotContext>): void {
       `├ Онлайн сейчас: ${stats.onlineUsers}\n` +
       `└ VIP клиентов: ${stats.vipUsers}`,
       {
+        parse_mode: 'HTML',
         reply_markup: await getAdminDashboardKeyboard(ctx.admin!.role)
       }
     )
@@ -277,10 +312,11 @@ export function setupCommands(bot: Bot<BotContext>): void {
     
     const stats = await getQuickStats()
     
-    await ctx.replyWithHTML(
+    await ctx.reply(
       '📊 <b>Быстрая статистика</b>\n\n' +
       stats.map(s => `${s.label}: <b>${s.value}</b>`).join('\n'),
       {
+        parse_mode: 'HTML',
         reply_markup: new InlineKeyboard()
           .text('🔧 Полная панель', 'admin:dashboard')
           .text('📊 Детальная аналитика', 'admin:analytics')
